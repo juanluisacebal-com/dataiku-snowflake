@@ -44,6 +44,9 @@ jobs:
             echo "USE_KEY_PAIR=false" >> $GITHUB_ENV
           fi
 
+      - name: Debug file structure
+        run: ls -R
+
       - name: Run schemachange
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
@@ -51,7 +54,7 @@ jobs:
           # The password env is set in the previous step if applicable
         run: |
           # Construct the command dynamic arguments
-          CMD="schemachange deploy -f ./migrations -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER --create-change-history-table"
+          CMD="schemachange deploy -f $GITHUB_WORKSPACE/scripts_sql -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER --create-change-history-table"
           
           # Add authentication arguments
           if [[ "$USE_KEY_PAIR" == "true" ]]; then
