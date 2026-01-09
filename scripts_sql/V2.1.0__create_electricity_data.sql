@@ -1,5 +1,5 @@
 -- Create DataWareHouse database if it doesn't exist
-CREATE DATABASE IF NOT EXISTS DataWareHouse;
+CREATE OR REPLACE DATABASE DataWareHouse;
 
 -- Set the context to the new database
 USE DATABASE DataWareHouse;

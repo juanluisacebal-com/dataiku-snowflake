@@ -37,7 +37,7 @@ def get_snowflake_connection():
 
     return snowflake.connector.connect(**connect_args)
 
-def fetch_pvpc_prices():
+def fetch_indicator(indicator_id, source_name):
     ree_token = os.environ.get('REE_TOKEN')
     if not ree_token:
         raise ValueError("REE_TOKEN environment variable is not set")
@@ -49,65 +49,53 @@ def fetch_pvpc_prices():
         'Authorization': f'Token token="{ree_token}"'
     }
     
-    # Indicator 1001 is "Término de facturación de energía activa del PVPC 2.0TD"
-    # We fetch for the current day. ESIOS API by default returns latest data if date not specified, 
-    # or strict date range. Let's start with default call which usually gives today/tomorrow.
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d")
-    # Using 23:59 to get the full day
-    url = f"https://api.esios.ree.es/indicators/1001?start_date={date_str}T00:00&end_date={date_str}T23:59"
+    # Fetch data for current day
+    url = f"https://api.esios.ree.es/indicators/{indicator_id}?start_date={date_str}T00:00&end_date={date_str}T23:59"
     
-    print(f"Fetching data from: {url}")
+    print(f"Fetching {source_name} (Ind: {indicator_id}) from: {url}")
     response = requests.get(url, headers=headers)
     
     if response.status_code != 200:
-        raise Exception(f"API request failed with status {response.status_code}: {response.text}")
+        print(f"Failed to fetch {source_name}: {response.status_code}")
+        return []
 
     data = response.json()
-    return data
-
-def ingest_data(conn, data):
-    cursor = conn.cursor()
-    
-    # ESIOS Indicator 1001 response structure
-    # data['indicator']['values'] is a list of dicts
     values = data.get('indicator', {}).get('values', [])
     
-    if not values:
-        print("No values found in API response")
-        return
-
-    print(f"Found {len(values)} records to ingest")
-    
-    insert_query = """
-    INSERT INTO PVPC_PRICES (DATE_ID, PRICE_VALUE, GEO_ID, GEO_NAME)
-    VALUES (%s, %s, %s, %s)
-    """
-    
-    rows_to_insert = []
-    
+    results = []
     for item in values:
-        # item['datetime'] is like '2023-10-27T00:00:00.000+02:00'
-        # item['value'] is the price
-        # item['geo_id'] 
-        # item['geo_name']
-        
-        # We need to handle timezone or just store as is. Snowflake TIMESTAMP_NTZ assumes wall time.
-        # ESIOS returns ISO format.
         ts_str = item.get('datetime')
-        # Remove timezone offset for NTZ or parse strictly. 
-        # Simpler for this demo: keep string and let Snowflake parse or python parse.
-        # Python isoformat parsing:
         dt_val = datetime.fromisoformat(ts_str)
         
-        price = item.get('value')
+        # Convert €/MWh to €/kWh
+        raw_price = item.get('value')
+        price_kwh = raw_price / 1000.0 if raw_price is not None else None
+        
         geo_id = item.get('geo_id')
         geo_name = item.get('geo_name')
         
-        rows_to_insert.append((dt_val, price, geo_id, geo_name))
+        results.append((dt_val, price_kwh, source_name, geo_id, geo_name))
+        
+    print(f"Fetched {len(results)} records for {source_name}")
+    return results
 
+def ingest_data(conn, all_rows):
+    if not all_rows:
+        print("No data to ingest.")
+        return
+
+    cursor = conn.cursor()
+    print(f"Ingesting {len(all_rows)} total records...")
+    
+    insert_query = """
+    INSERT INTO ELECTRICITY_PRICES (DATE_ID, PRICE_VALUE, PRICE_SOURCE, GEO_ID, GEO_NAME)
+    VALUES (%s, %s, %s, %s, %s)
+    """
+    
     try:
-        cursor.executemany(insert_query, rows_to_insert)
+        cursor.executemany(insert_query, all_rows)
         print("Ingestion completed successfully")
     except Exception as e:
         print(f"Error executing insert: {e}")
@@ -116,15 +104,20 @@ def ingest_data(conn, data):
         cursor.close()
 
 def main():
-    print("Starting PVPC ingestion...")
+    print("Starting Electricity Data ingestion...")
     try:
         conn = get_snowflake_connection()
         print("Connected to Snowflake.")
         
-        data = fetch_pvpc_prices()
-        print("Fetched data from REE.")
+        # Indicator 1001: PVPC 2.0TD (Retail)
+        pvpc_rows = fetch_indicator(1001, 'PVPC')
         
-        ingest_data(conn, data)
+        # Indicator 600: Precio mercado SPOT diario (Wholesale)
+        omie_rows = fetch_indicator(600, 'OMIE')
+        
+        all_rows = pvpc_rows + omie_rows
+        
+        ingest_data(conn, all_rows)
         
     except Exception as e:
         print(f"An error occurred: {e}")
