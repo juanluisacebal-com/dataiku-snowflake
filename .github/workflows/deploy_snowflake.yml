@@ -51,7 +51,7 @@ jobs:
           # The password env is set in the previous step if applicable
         run: |
           # Construct the command dynamic arguments
-          CMD="schemachange -f ./migrations -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER -c" # -c for create change history table if not exists
+          CMD="schemachange deploy -f ./migrations -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER --create-change-history-table"
           
           # Add authentication arguments
           if [[ "$USE_KEY_PAIR" == "true" ]]; then
