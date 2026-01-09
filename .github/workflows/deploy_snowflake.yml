@@ -44,6 +44,67 @@ jobs:
             echo "USE_KEY_PAIR=false" >> $GITHUB_ENV
           fi
 
+      - name: Create METADATA database if missing
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          # SNOWFLAKE_PASSWORD, SNOWFLAKE_PRIVATE_KEY_PATH, USE_KEY_PAIR are in GITHUB_ENV
+        shell: python
+        run: |
+          import os
+          import snowflake.connector
+          from cryptography.hazmat.backends import default_backend
+          from cryptography.hazmat.primitives import serialization
+
+          account = os.environ.get('SNOWFLAKE_ACCOUNT')
+          user = os.environ.get('SNOWFLAKE_USER')
+          use_key_pair = os.environ.get('USE_KEY_PAIR')
+          
+          password = os.environ.get('SNOWFLAKE_PASSWORD')
+          private_key_path = os.environ.get('SNOWFLAKE_PRIVATE_KEY_PATH')
+
+          connect_args = {
+              "account": account,
+              "user": user,
+              "warehouse": "COMPUTE_WH", # Default warehouse
+              "database": "SNOWFLAKE", # Connect to system DB initially
+              "schema": "PUBLIC"
+          }
+
+          if use_key_pair == 'true':
+              with open(private_key_path, "rb") as key:
+                  p_key= serialization.load_pem_private_key(
+                      key.read(),
+                      password=None,
+                      backend=default_backend()
+                  )
+              
+              pkb = p_key.private_bytes(
+                  encoding=serialization.Encoding.DER,
+                  format=serialization.PrivateFormat.PKCS8,
+                  encryption_algorithm=serialization.NoEncryption())
+              
+              connect_args["private_key"] = pkb
+          else:
+              connect_args["password"] = password
+
+          print("Connecting to Snowflake to verify METADATA database...")
+          try:
+              conn = snowflake.connector.connect(**connect_args)
+              cs = conn.cursor()
+              print("Creating database METADATA if not exists...")
+              cs.execute("CREATE DATABASE IF NOT EXISTS METADATA")
+              print("Database METADATA ensured.")
+          except Exception as e:
+              print(f"Error creating database: {e}")
+              # We don't exit with error here to let schemachange try, 
+              # but usually if this fails schemachange will also fail.
+              # actually let's raise so we see the error clearly
+              raise e
+          finally:
+              if 'conn' in locals():
+                  conn.close()
+
       - name: Debug file structure
         run: ls -R
 
