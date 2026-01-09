@@ -20,8 +20,9 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install schemachange
-        run: pip install schemachange
+      - name: Install dependencies
+        run: |
+          pip install schemachange requests snowflake-connector-python cryptography
 
       - name: Determine Credentials
         id: credentials
@@ -141,3 +142,14 @@ jobs:
           
           # run it
           $CMD
+
+      - name: Ingest PVPC Data
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          # SNOWFLAKE_PASSWORD/KEY already in ENV from previous step (Set up Credentials) or not?
+          # Actually 'Determine Credentials' put them in GITHUB_ENV so they are available globally to subsequent steps
+          REE_TOKEN: ${{ secrets.REE_TOKEN }}
+        run: |
+          echo "Running PVPC ingestion..."
+          python scripts_py/ingest_pvpc.py
